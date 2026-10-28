@@ -1,0 +1,93 @@
+# ============================================================
+# CẤU HÌNH CÔNG CỤ GIÁM SÁT HỘI NHÓM FACEBOOK (OSINT)
+# ============================================================
+# CHỈ thu thập dữ liệu CÔNG KHAI, tuân thủ ToS & đạo đức.
+# KHÔNG sử dụng công cụ này để bypass bảo mật hoặc thu thập
+# dữ liệu riêng tư.
+
+scraper:
+  # Thư mục lưu CSDL & cache
+  data_dir: "data"
+  report_dir: "reports"
+
+  # Giới hạn tốc độ (rate limiting) - đơn vị: giây giữa 2 request
+  request_delay: 3.0
+  # Số lần retry tối đa khi request thất bại
+  max_retries: 3
+  # Timeout request (giây)
+  timeout: 15
+  # Những URL proxy tuỳ chọn (để trống nếu không dùng)
+  # proxies:
+  #   http: "http://proxy:port"
+  #   https: "http://proxy:port"
+
+# Facebook - mobile/basic HTML được coi là nguồn công khai
+facebook:
+  # Sử dụng m.facebook.com (giao diện cơ bản, ít JS hơn)
+  base_url: "https://www.facebook.com"
+  mobile_url: "https://m.facebook.com"
+  # Chỉ thu thập từ nhóm công khai (public groups)
+  only_public_groups: true
+  # User-Agent cố định (đừng giả mạo nếu credentials chính thức)
+  user_agent: "Mozilla/5.0 (compatible; OSINTGroupMonitor/1.0; +http://yourdomain.com/bot)"
+
+# Nhóm mục tiêu - danh sách ID / URL nhóm cần giám sát
+# (nếu trống, pipeline tự nạp từ seed_groups.yaml do lệnh `discover` sinh ra)
+target_groups:
+  - id: "123456789"
+    url: "https://www.facebook.com/groups/123456789"
+    note: "Nhóm công khai mẫu"
+
+# ---- Profile quét: chọn cách quét (xem: python main.py profiles) ----
+# Ghi đè bằng `python main.py run --profile <tên>`. Wizard: `python main.py configure`.
+active_profile: "standard"
+scan_profiles: {}      # Preset mặc định nằm trong code; profile tự tạo sẽ hiện ở đây
+
+# ---- Thu thập seed: phát hiện hội nhóm theo khu vực + chủ đề ----
+# LƯU Ý (kiểm chứng 2026): Bing đã bỏ `site:` operator; DuckDuckGo/Brave
+# chặn automation. Engine khả dụng duy nhất là Google Custom Search JSON API
+# (free 100 query/ngày). Cần API key -> ĐỪNG hardcode trong repo:
+#   setx GOOGLE_API_KEY "AIza..."
+#   setx GOOGLE_CSE_ID  "cx..."   (Programmable Search Engine id)
+# Nếu không có key: tự tạo seed_groups.yaml rồi chạy `run --seed seed_groups.yaml`.
+discovery:
+  regions: ["Ha Noi", "Da Nang", "TP.HCM"]
+  topics: ["bat dong san", "tuyen dung", "cho do cu"]
+  # Biến thể query: {region} {topic}
+  templates:
+    - 'site:facebook.com/groups/ "{region}" {topic}'
+  engines: [google_cse]     # duckduckgo = dự phòng không key nhưng hay bị chặn
+  max_pages: 1              # 10 kết quả/query; tăng -> tốn quota
+  max_queries: 20           # giới hạn cứng số query mỗi lần discover
+  request_delay: 1.5        # giây giữa 2 request tới engine
+  output: "seed_groups.yaml"
+  # google_api_key / google_cse_id: ưu tiên đọc từ biến môi trường ở trên
+  google_api_key: ""
+  google_cse_id: ""
+
+# Trích xuất thông tin liên hệ từ profile công khai
+link_extractor:
+  extract_phone: true
+  extract_social_links: true
+  # Các domain mạng xã hội được nhận diện
+  social_domains:
+    - facebook.com
+    - fb.com
+    - m.facebook.com
+    - instagram.com
+    - tiktok.com
+    - twitter.com
+    - x.com
+    - linkedin.com
+    - youtube.com
+    - telegram.me
+    - t.me
+    - zalo.me
+    - vk.com
+    - reddit.com
+
+# Giới hạn số bản ghi thu thập mỗi lần chạy (chống quá tải)
+limits:
+  max_members_per_group: 50
+  max_admin_profiles: 20
+  max_posts_per_group: 20

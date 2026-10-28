@@ -1,0 +1,54 @@
+# ============ Dữ liệu thu thập (KHÔNG commit) ============
+# Dự án này lưu SĐT, email, ngày sinh, hồ sơ cá nhân và ảnh chụp HTML.
+# Đây là dữ liệu cá nhân theo Nghị định 13/2023/NĐ-CP — tuyệt đối không
+# đưa lên git. Một lần đã commit thì dữ liệu nằm vĩnh viễn trong history
+# kể cả sau khi xoá file.
+data/
+reports/
+html_dump/
+*.db
+*.db-wal
+*.db-shm
+seed_groups.yaml
+
+# ============ Khoá/ bí mật ============
+config.yaml.bak
+.env
+.env.*
+*.pem
+*.key
+secrets*.yaml
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ============ Môi trường ảo ============
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============ Test / cache ============
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ============ IDE / OS ============
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
