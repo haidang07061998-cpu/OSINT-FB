@@ -119,17 +119,46 @@ def _multiplier(text: str) -> int:
     return 1
 
 
+def _grouped_thousands(s: str, sep: str) -> Optional[str]:
+    """'5.678' -> '5678' nếu MỌI nhóm sau dấu đều đúng 3 chữ số, else None.
+
+    Phân biệt dấu phân cách hàng nghìn với dấu thập phân: "501.234" là 501234
+    còn "1.5" là 1,5. Trước đây code xoá thẳng dấu chấm nên "1.5 triệu" bị đọc
+    thành "15 triệu" — sai gấp 10 lần.
+    """
+    parts = s.split(sep)
+    if len(parts) < 2:
+        return None
+    if not parts[0].isdigit():
+        return None
+    if not all(p.isdigit() and len(p) == 3 for p in parts[1:]):
+        return None
+    return "".join(parts)
+
+
 def _to_number(num_text: str, mult_text: str = "") -> Optional[int]:
     """'12,5' + 'nghin' -> 12500 | '12,500' + '' -> 12500 | '5.678' -> 5678"""
-    s = num_text.strip().replace(" ", "").replace(".", "")
+    s = (num_text or "").strip().replace(" ", "")
     if not s:
         return None
-    if "," in s:
-        head, _, frac = s.partition(",")
-        if not frac.isdigit() or not head.isdigit():
+    if "." in s and "," in s:
+        # Có cả hai dấu: dấu xuất hiện SAU CÙNG là dấu thập phân
+        dec = "." if s.rfind(".") > s.rfind(",") else ","
+        s = s.replace("," if dec == "." else ".", "")
+        head, _, frac = s.partition(dec)
+        if not (head.isdigit() and frac.isdigit()):
             return None
-        # Phẩy + 3 chữ số là dấu phân cách hàng nghìn; ngược lại là dấu thập phân
-        value = float(f"{head}{frac}" if len(frac) == 3 else f"{head}.{frac}")
+        value = float(f"{head}.{frac}")
+    elif "." in s or "," in s:
+        sep = "." if "." in s else ","
+        grouped = _grouped_thousands(s, sep)
+        if grouped is not None:
+            value = float(grouped)
+        else:
+            head, _, frac = s.partition(sep)
+            if not (head.isdigit() and frac.isdigit()):
+                return None
+            value = float(f"{head}.{frac}")
     elif s.isdigit():
         value = float(s)
     else:
@@ -509,7 +538,10 @@ def parse_group(
         m = re.search(
             r'"(?:groupDescription|description)"\s*:\s*"([^"]{10,400})"', html
         )
-        if m and "Mekong" not in m.group(1):
+        # Trước đây có điều kiện `"Mekong" not in ...` — một mẹo gắn với dữ liệu
+        # thử nghiệm bị lọt vào code thật, khiến nhóm nào có chữ "Mekong" trong
+        # mô tả thì mô tả bị bỏ qua vô cớ.
+        if m:
             description = clean_text(m.group(1))
 
     # ---- Privacy ----

@@ -53,7 +53,10 @@ def test_window_filter(text, days, want):
 
 @pytest.fixture
 def posts_html():
-    now_ts = int(datetime(2026, 10, 10, 10, 0, 0).timestamp())
+    # `within_window()` lọc theo datetime.now(), nên mốc thời gian trong fixture
+    # phải tính từ hiện tại. Trước đây hardcode 10/10/2026 -> sau 7 ngày bài đó
+    # rơi ra ngoài cửa sổ và test tự hỏng dù code không đổi.
+    now_ts = int((datetime.now() - timedelta(hours=2)).timestamp())
     return f"""
 <html><body>
 <div role="article"><span data-utime="{now_ts}">cũ</span><h2>A</h2><p>Bài 1 trong nhóm, có nội dung đủ dài để parse và kiểm tra</p><a href="/nguoidung1">link</a><span>5 bình luận</span><span>12 lượt thích</span></div>

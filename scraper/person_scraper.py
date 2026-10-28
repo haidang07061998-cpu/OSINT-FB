@@ -40,8 +40,14 @@ _RELATIONSHIP_RE = re.compile(
     r"|quan he phuc tap|mẹ đơn thân|bo don than)",
 )
 _NAME_META_RE = re.compile(r'"name"\s*:\s*"([^"]+)"')
-_FB_ID_RE = re.compile(
-    r'(?i)(?:profile\.php\?id=|facebook\.com/|"userID"\s*:\s*")(\d{6,})'
+# CHỈ nhận UID từ dạng URL (profile.php?id= hoặc facebook.com/<số>).
+# KHÔNG dùng `"userID":"..."` trong JS: đó là ID của NGƯỜI ĐANG XEM trang,
+# có mặt trên mọi trang đã lưu -> gán nhầm danh tính cho hồ sơ.
+_FB_ID_RE = re.compile(r"(?i)(?:profile\.php\?id=|facebook\.com/)(\d{6,})")
+# Tiêu đề trang KHÔNG phải tên người (trang đăng nhập, trang lỗi...)
+_CHROME_TITLE_RE = re.compile(
+    r"(?i)^(facebook|log ?in|log into facebook|đăng nhập|home|trang chủ"
+    r"|content not found|không tìm thấy.*)$"
 )
 _DATE_RE = re.compile(
     r"\b(?:([12]\d|3[01]|0?[1-9])[/\-](1[0-2]|0?[1-9])[/\-](19\d{2}|20[0-2]\d)"
@@ -211,14 +217,18 @@ def parse_person_from_html(html: str, source_file: str = "") -> Optional[PersonP
         all_text = f"{all_text} " + " ".join(meta_bits)
 
     # ---- Tên & URL ----
+    # Ưu tiên og:title (metadata của CHÍNH trang hồ sơ). `"name"` đầu tiên
+    # trong HTML thô có thể là của người khác -> gán nhầm tên.
     name = None
-    m = _NAME_META_RE.search(html)
-    if m:
-        name = clean_text(m.group(1))
+    og = soup.find("meta", property="og:title")
+    if og and og.get("content"):
+        cand = clean_text(og["content"].split("|")[0].strip())
+        if cand and not _CHROME_TITLE_RE.match(cand.strip("| ")):
+            name = cand
     if not name:
-        og = soup.find("meta", property="og:title")
-        if og and og.get("content"):
-            name = clean_text(og["content"].split("|")[0].strip())
+        m = _NAME_META_RE.search(html)
+        if m:
+            name = clean_text(m.group(1))
 
     profile_url = ""
     canonical = soup.find("link", rel="canonical")

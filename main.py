@@ -163,8 +163,10 @@ def main() -> int:
 
     handler = COMMANDS.get(args.command)
     if handler is None:
+        # "help" là lệnh hợp lệ, không phải lỗi -> exit 0. Trước đây trả 1 nên
+        # script chạy `python main.py help` bị coi là thất bại.
         parser.print_help()
-        return 1
+        return 0
     return handler(args)
 
 

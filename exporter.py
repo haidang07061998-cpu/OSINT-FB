@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List
 
 import pandas as pd
 
-from models import MonitoredGroup
+from models import MonitoredGroup, utcnow
 
 # Ký tự mà Excel/CSheets sẽ diễn giải thành công thức nếu đặt ở đầu ô.
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -181,7 +180,7 @@ def export_persons_csv(persons: Iterable, out_path: Path) -> Path:
         "Tên", "Username", "FB ID", "Profile URL", "Số điện thoại", "Email",
         "Mạng xã hội", "Giới tính", "Sinh nhật", "Sống tại", "Đến từ",
         "Công việc", "Nơi làm việc", "Học vấn", "Tình trạng quan hệ",
-        "Tích xanh", "Nguồn", "Trích xuất lúc",
+        "Tích xanh", "Từ khóa", "Website", "Nguồn", "Trích xuất lúc",
     ]
     with out_path.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -236,5 +235,7 @@ def export_workbook(
 
 
 def make_report(prefix: str = "report") -> Path:
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    # `datetime.utcnow()` đã bị deprecated (và trả datetime "naive" mang giờ
+    # UTC); dùng utcnow() của models để cùng một quy ước thời gian.
+    ts = utcnow().strftime("%Y%m%d_%H%M%S")
     return Path("reports") / f"{prefix}_{ts}"

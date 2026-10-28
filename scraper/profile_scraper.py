@@ -28,6 +28,15 @@ _ROLE_PATTERNS = [
 
 _NAME_META_RE = re.compile(r'"name"\s*:\s*"([^"]+)"')
 _FB_ID_RE = re.compile(r"(?i)(?:profile\.php\?id=|facebook\.com/)(\d{6,})")
+# Tiêu đề trang KHÔNG phải tên người (trang đăng nhập, trang lỗi...)
+_CHROME_TITLE_RE = re.compile(
+    r"(?i)^(facebook|log ?in|log into facebook|đăng nhập|home|trang chủ"
+    r"|content not found|không tìm thấy.*)$"
+)
+
+
+def _is_chrome_title(value: Optional[str]) -> bool:
+    return bool(value) and bool(_CHROME_TITLE_RE.match(value.strip("| ")))
 
 
 def _detect_role(text: str) -> Optional[str]:
@@ -60,20 +69,27 @@ def parse_admin_from_html(
     text = _collect_text_bits(soup)
 
     # ---- Tên ----
+    # Ưu tiên og:title (metadata của CHÍNH trang). `"name"` đầu tiên trong HTML
+    # thô có thể thuộc về người khác (bạn bè / gợi ý ở khung bên cạnh) -> gán
+    # nhầm tên của người khác vào hồ sơ này.
     name = None
-    m = _NAME_META_RE.search(html)
-    if m:
-        name = clean_text(m.group(1))
+    og = soup.find("meta", property="og:title")
+    if og and og.get("content"):
+        cand = clean_text(og["content"].replace(" | Facebook", "").strip("| "))
+        if cand and not _is_chrome_title(cand):
+            name = cand
     if not name:
-        og = soup.find("meta", property="og:title")
-        if og and og.get("content"):
-            name = clean_text(og["content"].replace(" | Facebook", "").strip("| "))
+        m = _NAME_META_RE.search(html)
+        if m:
+            name = clean_text(m.group(1))
 
     # ---- Vai trò ----
     role = role_hint or _detect_role(text) or "unknown"
 
     # ---- ID ----
-    m = _FB_ID_RE.search(html) or _FB_ID_RE.search(profile_url)
+    # Lấy UID từ URL của chính trang trước; chỉ khi URL không có ID mới quét
+    # HTML, vì match đầu tiên trong toàn văn bản có thể là người khác.
+    m = _FB_ID_RE.search(profile_url) or _FB_ID_RE.search(html)
     fb_uid = m.group(1) if m else None
 
     # ---- Liên hệ (feature cốt lõi) ----

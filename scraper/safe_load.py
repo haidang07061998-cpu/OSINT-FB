@@ -10,7 +10,7 @@ hiện ra cho người dùng.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List
 
 logger = logging.getLogger("osint.safe_load")
 

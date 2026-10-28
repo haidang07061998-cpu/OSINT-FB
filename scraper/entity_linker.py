@@ -137,6 +137,16 @@ def load_records_from_db(db_path: Path) -> List[IdentityRecord]:
     from storage import query_admins, query_persons
 
     records: List[IdentityRecord] = []
+
+    # `key` là DANH TÍNH của bản ghi trong DSU. Hai dòng khác nhau tuyệt đối
+    # không được trùng key: trước đây hồ sơ không có link cho ra cùng một khoá
+    # `admin:<gid>:None` (hoặc `person:None`), DSU coi chúng là một người và
+    # một bản ghi biến mất khỏi cụm.
+    used_keys: Dict[str, int] = defaultdict(int)
+
+    def _uniq(base: str) -> str:
+        used_keys[base] += 1
+        return base if used_keys[base] == 1 else f"{base}#{used_keys[base]}"
     for row in query_admins(db_path):
         try:
             phones = [p.get("normalized") for p in json.loads(row.get("phones") or "[]")
@@ -150,7 +160,10 @@ def load_records_from_db(db_path: Path) -> List[IdentityRecord]:
         ]
         socials = [s for s in socials if s]
         records.append(IdentityRecord(
-            key=f"admin:{row.get('group_id')}:{row.get('profile_url')}",
+            key=_uniq(
+                f"admin:{row.get('group_id')}:"
+                f"{row.get('profile_url') or row.get('fb_user_id') or row.get('name') or '?'}"
+            ),
             kind=row.get("role") or "unknown",
             name=row.get("name"),
             profile_url=row.get("profile_url"),
@@ -176,7 +189,9 @@ def load_records_from_db(db_path: Path) -> List[IdentityRecord]:
         ]
         socials = [s for s in socials if s]
         records.append(IdentityRecord(
-            key=f"person:{row.get('profile_url') or row.get('name')}",
+            key=_uniq(
+                f"person:{row.get('profile_url') or row.get('username') or row.get('name') or '?'}"
+            ),
             kind="person",
             name=row.get("name"),
             profile_url=row.get("profile_url"),

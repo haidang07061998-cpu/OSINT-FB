@@ -61,8 +61,18 @@ def process_targets(
     results: List[MonitoredGroup] = []
 
     for i, t in enumerate(targets, 1):
-        gid = str(t["id"])
-        url = t["url"]
+        # Config do người dùng sửa tay: một mục thiếu id/url (hoặc không phải
+        # dict) không được làm chết cả lượt quét.
+        if not isinstance(t, dict):
+            logger.warning("Bỏ qua mục tiêu không hợp lệ (không phải dict): %r", t)
+            continue
+        gid = str(t.get("id") or "").strip()
+        url = str(t.get("url") or "").strip()
+        if not gid or not url:
+            logger.warning("Bỏ qua mục tiêu thiếu id/url: %r", t)
+            if progress_cb:
+                progress_cb(i, len(targets), f"bỏ qua mục tiêu lỗi: {t}")
+            continue
 
         # Số bài lấy từ trang nhóm: profile quyết định, không profile thì 20
         max_posts = (
@@ -143,6 +153,10 @@ def enrich_admins(
         # Ưu tiên admin, rồi kiểm duyệt viên, tới hạn mức max_accounts
         picked = (list(g.admins) + list(g.moderators))[:max_accounts]
         for p in picked:
+            # Hồ sơ chỉ có tên, không có link -> không có gì để tải.
+            # Trước đây vẫn gọi client.get(None) và ghi log lỗi mỗi lần.
+            if not p.profile_url:
+                continue
             full = scrape_admin_profile(client, p.profile_url, role_hint=p.role or None)
             if full:
                 p.phones = full.phones

@@ -110,7 +110,10 @@ def _load_json_export(path: Path) -> Optional[MonitoredGroup]:
         if not url or url in members_seen:
             continue
         members_seen.add(url)
-        group.admins.append(AdminProfile(
+        # Người trong danh sách thành viên phải vào `members`, KHÔNG vào
+        # `admins`: trước đây ghi nhầm bucket nên báo cáo đếm thành viên
+        # thành quản trị viên.
+        group.members.append(AdminProfile(
             name=_first_line(p.get("label")), profile_url=url,
             role="member", source="danh sách thành viên",
         ))
@@ -182,13 +185,14 @@ def _profile_url_from_html(html: str) -> str:
 
     Chỉ bỏ tham số theo dõi của Facebook (`?__cft__[0]=...`), GIỮ `?id=`
     vì đó là định danh của tài khoản.
+
+    KHÔNG dùng `"userID"` trong JS làm phương án dự phòng: đó là ID của người
+    đang xem (chủ tài khoản đã lưu trang), không phải chủ trang. Dùng nó sẽ
+    gán hồ sơ của người này cho người khác.
     """
     m = re.search(r'<link[^>]+rel="canonical"[^>]+href="([^"]+)"', html)
     if m and "facebook.com" in m.group(1):
         return _clean_fb_url(m.group(1))
-    m = re.search(r'"userID"\s*:\s*"(\d+)"', html)
-    if m:
-        return f"https://www.facebook.com/profile.php?id={m.group(1)}"
     m = re.search(r'<meta property="og:url" content="([^"]+)"', html)
     if m and ("facebook.com/" in m.group(1)):
         return _clean_fb_url(m.group(1))
@@ -641,7 +645,20 @@ def _import_path_list(paths: List[Path]) -> List[MonitoredGroup]:
 
     # ---- PASS 1: nhóm (nhận MỌI file html, tự nhận diện ID từ nội dung) ----
     skipped: List[str] = []
-    consumed: set = set()
+
+    def _route_profile_file(path: Path) -> None:
+        """Xếp 1 file hồ sơ vào đúng lượt xử lý.
+
+        Nội dung trang cho biết đó là hồ sơ; TÊN FILE cho biết hồ sơ đó là
+        admin/mod của nhóm (`profile_...`, `admin_...`, `mod_...`) hay hồ sơ
+        cá nhân độc lập. Trước đây mọi hồ sơ đều bị coi là "person" nên quy
+        ước đặt tên trong docstring không có tác dụng: file `admin_*.html`
+        không bao giờ được gắn vào nhóm.
+        """
+        fkind, fgid, _hint = _classify(path) or ("person", "", path.name)
+        if fkind not in ("profile", "admin", "mod", "post"):
+            fkind, fgid = "person", ""
+        files.append((fkind, fgid, path.name, path))
 
     for path in all_html:
         html = _read(path)
@@ -651,14 +668,12 @@ def _import_path_list(paths: List[Path]) -> List[MonitoredGroup]:
         # PASS 1: nhận loại trang BẰNG NỘI DUNG (không theo tên file)
         kind, gid = _page_kind(html)
         if kind == "person":
-            files.append(("person", "", path.name, path))
-            consumed.add(path)
+            _route_profile_file(path)
             continue
         if not gid:
             # không có ID nhóm: có thể là trang cá nhân lạ
             if _detect_profile_url(html):
-                files.append(("person", "", path.name, path))
-                consumed.add(path)
+                _route_profile_file(path)
                 continue
             # hoặc là trang nhóm nhưng FB không ghi ID (vd tab Giới thiệu)
             # -> gắn vào nhóm duy nhất đang có, đừng bỏ mất dữ liệu
@@ -680,7 +695,6 @@ def _import_path_list(paths: List[Path]) -> List[MonitoredGroup]:
         if not group:
             skipped.append(path.name)
             continue
-        consumed.add(path)
         stats = {
             "file": path.name,
             "size_kb": round(path.stat().st_size / 1024, 1),
@@ -844,7 +858,7 @@ importer_state: Dict[str, list] = {}
 def run_import(folder: str, cfg_path: str = "config.yaml") -> List[MonitoredGroup]:
     """CLI entry: import folder -> lưu DB + snapshot + xuất báo cáo."""
     from exporter import export_persons_csv
-    from pipeline import finalize, load_config
+    from pipeline import finalize, load_config, report_dir
 
     cfg = load_config(cfg_path)
     groups = import_from_folder(folder)
@@ -857,10 +871,12 @@ def run_import(folder: str, cfg_path: str = "config.yaml") -> List[MonitoredGrou
 
     finalize(cfg, groups, persons)
 
+    # Dùng report_dir của config (trước đây ghi cứng vào reports/).
+    rdir = report_dir(cfg)
     if persons:
-        export_persons_csv(persons, Path("reports") / "ho_so_ca_nhan.csv")
+        export_persons_csv(persons, rdir / "ho_so_ca_nhan.csv")
     logger.info(
-        "Xong | nhom=%d nguoi_ho_so=%d | bao cao: reports/bao_cao.xlsx",
-        len(groups), len(persons),
+        "Xong | nhom=%d nguoi_ho_so=%d | bao cao: %s",
+        len(groups), len(persons), rdir / "bao_cao.xlsx",
     )
     return groups

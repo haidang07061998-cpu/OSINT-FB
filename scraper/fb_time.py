@@ -36,6 +36,34 @@ _UNIT_DELTA = {
 }
 
 
+def _build(now: datetime, year: int, month: int, day: int, text: str,
+           explicit_year: bool) -> Optional[datetime]:
+    """Ghép ngày + giờ (nếu có) thành datetime.
+
+    Facebook bỏ năm khi bài còn mới, nên một ngày KHÔNG kèm năm mà rơi vào
+    tương lai chỉ có một nghĩa: bài đăng năm trước (hôm nay 3/3 đọc thấy
+    "12 tháng 5" thì đó là 12/5 năm trước). Không lùi năm thì bài cũ bị coi
+    là ở tương lai và lọt qua mọi bộ lọc theo khoảng thời gian.
+    """
+    hm = _HOUR_SEP.search(text)
+    try:
+        if hm:
+            base = now.replace(year=year, month=month, day=day,
+                               hour=int(hm.group(1)), minute=int(hm.group(2)),
+                               second=0, microsecond=0)
+        else:
+            base = now.replace(year=year, month=month, day=day,
+                               second=0, microsecond=0)
+    except ValueError:
+        return None
+    if not explicit_year and base > now:
+        try:
+            base = base.replace(year=year - 1)
+        except ValueError:  # 29/02 khi năm trước không phải năm nhuận
+            return None
+    return base
+
+
 def parse_fb_time(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
     """Trả về datetime ước lượng; None nếu không nhận diện được."""
     if not text:
@@ -69,32 +97,19 @@ def parse_fb_time(text: str, now: Optional[datetime] = None) -> Optional[datetim
     m = _DATE_FULL.search(low)
     if m:
         day, month = int(m.group(1)), int(m.group(2))
-        year = int(m.group(3)) if m.group(3) else now.year
-        try:
-            base = now.replace(year=year, month=month, day=day,
-                               second=0, microsecond=0)
-        except ValueError:
-            return None
-        hm = _HOUR_SEP.search(low)
-        if hm:
-            base = base.replace(hour=int(hm.group(1)), minute=int(hm.group(2)))
-        return base
+        explicit_year = bool(m.group(3))
+        year = int(m.group(3)) if explicit_year else now.year
+        return _build(now, year, month, day, low, explicit_year)
 
     # "May 12 at 20:15, 2024"
     m = _EN_DATE.search(low)
     if m:
         month = _MONTH_EN.get(m.group(1)[:3], 0)
         day = int(m.group(2))
-        year = int(m.group(3)) if m.group(3) else now.year
+        explicit_year = bool(m.group(3))
+        year = int(m.group(3)) if explicit_year else now.year
         if month:
-            try:
-                base = now.replace(year=year, month=month, day=day, second=0, microsecond=0)
-            except ValueError:
-                return None
-            hm = _HOUR_SEP.search(low)
-            if hm:
-                base = base.replace(hour=int(hm.group(1)), minute=int(hm.group(2)))
-            return base
+            return _build(now, year, month, day, low, explicit_year)
 
     return None
 

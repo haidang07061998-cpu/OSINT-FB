@@ -42,9 +42,14 @@ class RunIdFilter(logging.Filter):
 # Run id của lần quét đang chạy trong thread này.
 _active = threading.local()
 
-# RecordFactory gốc của thư viện, và bản đã thay thế (None = chưa thay).
+# RecordFactory gốc của thư viện.
 _base_factory = logging.getLogRecordFactory()
-_installed_factory = None
+
+# Đếm số scope đang mở (toàn tiến trình). Chỉ gắn/gỡ factory khi số này
+# chuyển 0 <-> 1: nếu thread A gỡ factory trong lúc thread B còn quét thì log
+# của B mất dấu run_id và B "mù" giữa lần quét.
+_factory_lock = threading.Lock()
+_factory_users = 0
 
 
 def _stamping_factory(name, level, pathname, lineno, msg, args, exc_info,
@@ -67,27 +72,29 @@ class _RunIdScope:
     def __init__(self, run_id: str):
         self.run_id = run_id
         self._prev = None
-        self._installed = False
+        self._active = False
 
     def __enter__(self):
         self._prev = getattr(_active, "run_id", None)
         _active.run_id = self.run_id
-        global _installed_factory
-        if _installed_factory is None:
-            logging.setLogRecordFactory(_stamping_factory)
-            _installed_factory = _stamping_factory
-            self._installed = True
+        global _factory_users
+        with _factory_lock:
+            _factory_users += 1
+            if _factory_users == 1:
+                logging.setLogRecordFactory(_stamping_factory)
+        self._active = True
         return self
 
     def __exit__(self, *exc):
         _active.run_id = self._prev
-        global _installed_factory
-        # Chỉ gỡ factory nếu chính scope này cài, và không scope nào khác
-        # đang dùng. Gỡ khi còn session khác sẽ làm hỏng log của session đó.
-        if self._installed and getattr(_active, "run_id", None) is None:
-            if logging.getLogRecordFactory() is _installed_factory:
-                logging.setLogRecordFactory(_base_factory)
-            _installed_factory = None
+        global _factory_users
+        with _factory_lock:
+            if self._active:
+                self._active = False
+                _factory_users = max(0, _factory_users - 1)
+                if _factory_users == 0 and \
+                        logging.getLogRecordFactory() is _stamping_factory:
+                    logging.setLogRecordFactory(_base_factory)
         return False
 
 

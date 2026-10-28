@@ -10,9 +10,7 @@ import json
 import logging
 import re
 import sys
-import threading
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -43,6 +41,11 @@ from scraper.manual_importer import (  # noqa: E402
 from scraper.scan_profile import list_profiles, save_profile  # noqa: E402
 from storage import load_groups, load_persons  # noqa: E402
 from pipeline import build_client, enrich_admins, finalize, process_targets  # noqa: E402
+
+# Logger của module. Trước đây `_clear_all_data` gọi `logger.warning(...)` mà
+# chưa từng định nghĩa `logger`, nên nhánh "từ chối xoá ngoài thư mục dự án"
+# sẽ ném NameError — đúng lúc cần bảo vệ dữ liệu nhất.
+logger = logging.getLogger("osint.dashboard")
 
 st.set_page_config(
     page_title="OSINT Group Monitor",
@@ -255,7 +258,7 @@ def sidebar_input(cfg: dict):
         if uploaded:
             st.success(f"Đã chọn {len(uploaded)} file — bấm **📂 Nạp dữ liệu** để phân tích.")
 
-    keep_files = st.checkbox(
+    keep_files = st.sidebar.checkbox(
             "Giữ lại file đã nạp (để kiểm tra/chẩn đoán)",
             value=False,
             key="keep_files",
@@ -342,6 +345,17 @@ def _clear_all_data(notice=None):
     if db.exists():
         db.unlink()
         removed.append(str(db))
+    # SQLite ở chế độ WAL còn 2 file phụ. Chỉ xoá `.db` mà để lại `-wal` thì
+    # lần mở DB kế tiếp có thể phát lại WAL và làm sống lại đúng dữ liệu vừa
+    # xoá (kể cả SĐT) — người dùng tưởng đã xoá sạch.
+    for sidecar in (db.with_name(db.name + "-wal"),
+                    db.with_name(db.name + "-shm")):
+        if sidecar.exists():
+            try:
+                sidecar.unlink()
+                removed.append(str(sidecar))
+            except OSError as exc:
+                logger.warning("Không xoá được %s: %s", sidecar, exc)
     reports = _reports_dir()
     if reports.is_dir():
         if _is_inside_project(reports):
@@ -526,11 +540,15 @@ def _render_profile_checklist(groups, persons) -> None:
         return
 
     have_urls = {canonical_fb(x.profile_url) for x in persons if x.profile_url}
+    # canonical_fb trả None cho URL không phải hồ sơ (nhóm/bài viết) -> bỏ None
+    # để hồ sơ chưa có link không bị coi nhầm là "đã có".
+    have_urls.discard(None)
     have_names = {(x.name or "").strip().lower() for x in persons if x.name}
 
     rows = []
     for role, name, url in wanted:
-        got = bool(canonical_fb(url) in have_urls) or \
+        cf = canonical_fb(url)
+        got = bool(cf and cf in have_urls) or \
             ((name or "").strip().lower() in have_names)
         rows.append({
             "Trạng thái": "✅ Đã có hồ sơ" if got else "⬜ Cần lưu trang",
@@ -699,9 +717,14 @@ def show_results():
     # --- Tab hồ sơ cá nhân ---
     with tabs[3]:
         if persons:
-            pick = st.selectbox("Chọn hồ sơ",
-                                [p.name or str(p.profile_url) for p in persons])
-            p = next(x for x in persons if (x.name or str(x.profile_url)) == pick)
+            # Chọn theo CHỈ SỐ, không theo tên hiển thị: hai hồ sơ trùng tên
+            # (rất thường gặp) sẽ luôn mở nhầm về hồ sơ đầu tiên.
+            labels = [p.name or str(p.profile_url) or "(không tên)" for p in persons]
+            pick = st.selectbox(
+                "Chọn hồ sơ", list(range(len(persons))),
+                format_func=lambda i: labels[i],
+            )
+            p = persons[pick]
             c1, c2, c3 = st.columns(3)
             c1.write("**SĐT:** " + ("; ".join(x.normalized for x in p.phones) or "-"))
             c1.write("**Email:** " + ("; ".join(p.emails) or "-"))

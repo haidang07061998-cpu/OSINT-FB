@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
-from scraper.log_capture import LogCapture, RunIdFilter, ScanSession
+from scraper.log_capture import LogCapture, ScanSession
 
 # Không in log thật ra console trong test.
 @pytest.fixture(autouse=True)

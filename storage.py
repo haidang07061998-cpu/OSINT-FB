@@ -5,11 +5,10 @@ import hashlib
 import json
 import re
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from models import MonitoredGroup
+from models import MonitoredGroup, utcnow
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS groups (
@@ -164,7 +163,7 @@ def save_group(db_path: Path, group: MonitoredGroup) -> None:
             (
                 group.group_id, group.name, group.url, group.privacy.value,
                 group.member_count, group.description,
-                datetime.utcnow().isoformat(), group.model_dump_json(),
+                utcnow().isoformat(), group.model_dump_json(),
             ),
         )
         for bucket, plist in (
@@ -173,12 +172,26 @@ def save_group(db_path: Path, group: MonitoredGroup) -> None:
             ("members", group.members),
         ):
             for profile in plist:
+                # UNIQUE(group_id, profile_url) KHÔNG áp dụng cho NULL (trong
+                # SQLite mọi NULL đều khác nhau), nên hồ sơ không có URL sẽ
+                # được THÊM MỚI sau mỗi lần quét -> bảng phình vô hạn.
+                # Xoá bản cùng tên chưa có URL trước khi ghi.
+                if not profile.profile_url:
+                    conn.execute(
+                        f"DELETE FROM {bucket} WHERE group_id=? "
+                        f"AND profile_url IS NULL AND name IS ?",
+                        (group.group_id, profile.name),
+                    )
                 conn.execute(
                     f"""INSERT INTO {bucket}(group_id,fb_user_id,name,profile_url,role,is_verified,phones,social_links,extracted_at)
                        VALUES(?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(group_id,profile_url) DO UPDATE SET
+                         fb_user_id=COALESCE(excluded.fb_user_id, fb_user_id),
+                         name=COALESCE(excluded.name, name),
                          role=excluded.role, phones=excluded.phones,
-                         social_links=excluded.social_links, extracted_at=excluded.extracted_at""",
+                         social_links=excluded.social_links,
+                         is_verified=excluded.is_verified,
+                         extracted_at=excluded.extracted_at""",
                     (
                         group.group_id, profile.fb_user_id, profile.name,
                         profile.profile_url, profile.role, int(profile.is_verified),
@@ -290,15 +303,18 @@ def save_snapshot(db_path: Path, group) -> None:
                                      admins_json, posts_count, posts_json)
                VALUES(?,?,?,?,?,?,?)""",
             (
-                group.group_id, datetime.utcnow().isoformat(), group.member_count,
+                group.group_id, utcnow().isoformat(), group.member_count,
                 group.privacy.value,
                 json.dumps([{"name": a.name, "url": a.profile_url, "role": a.role}
                             for a in list(group.admins) + list(group.moderators)
                             + list(group.members)],
                            ensure_ascii=False),
                 len(group.recent_posts),
-                json.dumps([p.content for p in group.recent_posts if p.content],
-                           ensure_ascii=False)[:20000],
+                # Cắt DANH SÁCH bài rồi mới json.dumps. Trước đây cắt chuỗi JSON
+                # ở 20000 ký tự -> cột `posts_json` chứa JSON hỏng, đọc lại là
+                # lỗi; cắt theo phần tử thì luôn còn JSON hợp lệ.
+                json.dumps([p.content for p in group.recent_posts if p.content][:100],
+                           ensure_ascii=False),
             ),
         )
     conn.close()
@@ -385,6 +401,18 @@ def people_union(db_path: Path) -> List[dict]:
 
     by_name: Dict[tuple, dict] = {}
     final: List[dict] = []
+
+    def _index_of(target: dict) -> int:
+        """Vị trí của ĐÚNG đối tượng `target` (so danh tính, không so giá trị).
+
+        `list.index()` so sánh BẰNG GIÁ TRỊ: hai dict giống hệt nhau ở hai vị
+        trí khác nhau sẽ trả về vị trí đầu tiên, khiến ta ghi đè nhầm dòng.
+        """
+        for i, r in enumerate(final):
+            if r is target:
+                return i
+        return -1
+
     for row in best.values():
         key = (row["group_id"], _name_key(row["name"]))
         if len(key[1]) < 3:
@@ -396,13 +424,16 @@ def people_union(db_path: Path) -> List[dict]:
             final.append(row)
             continue
         # giữ bản có ID số, ưu tiên vai trò mạnh hơn
+        pos = _index_of(prev)
         if _has_uid(row["profile_url"]) and not _has_uid(prev["profile_url"]):
-            final[final.index(prev)] = row
+            if pos >= 0:
+                final[pos] = row
             by_name[key] = row
         elif not _has_uid(row["profile_url"]) and _has_uid(prev["profile_url"]):
             continue
         elif rank.get(row["role"], 1) > rank.get(prev["role"], 1):
-            final[final.index(prev)] = row
+            if pos >= 0:
+                final[pos] = row
             by_name[key] = row
     return final
 
